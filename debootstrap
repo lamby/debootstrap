@@ -34,6 +34,7 @@ HOST_ARCH=""
 HOST_OS=""
 KEEP_DEBOOTSTRAP_DIR=""
 USE_DEBIANINSTALLER_INTERACTION=""
+DETERMINISTIC=""
 SECOND_STAGE_ONLY=""
 PRINT_DEBS=""
 CHROOTDIR=""
@@ -117,6 +118,8 @@ usage()
                                (requires --second-stage)
       --extractor=TYPE       override automatic .deb extractor selection
                                (supported: $EXTRACTORS_SUPPORTED)
+      --deterministic        use SOURCE_DATE_EPOCH environment variable to seed
+                                installation
       --debian-installer     used for internal purposes by debian-installer
       --private-key=file     read the private key from file
       --certificate=file     use the client certificate stored in file (PEM)
@@ -148,6 +151,13 @@ if [ $# != 0 ] ; then
 			error 1 ARG_DIBYHAND "If running debootstrap by hand, don't use --debian-installer"
 		fi
 		USE_DEBIANINSTALLER_INTERACTION=yes
+		shift
+		;;
+	    --deterministic)
+		if [ ! -n "$SOURCE_DATE_EPOCH" ]; then
+			error 1 NEEDARG "SOURCE_DATE_EPOCH environment variable is not set" "$1"
+		fi
+		DETERMINISTIC=true
 		shift
 		;;
 	    --foreign)
@@ -694,6 +704,23 @@ if am_doing_phase second_stage; then
 		fi
 	else
 		rm -rf "$TARGET/debootstrap"
+	fi
+
+	if [ "$DETERMINISTIC" = true ]; then
+		# Delete cache files
+		rm -f "$TARGET/var/log/dpkg.log"
+		rm -f "$TARGET/var/log/bootstrap.log"
+		rm -f "$TARGET/var/log/alternatives.log"
+		rm -f "$TARGET/var/cache/ldconfig/aux-cache"
+
+		# systemd machine-id
+		if [ -e "$TARGET/etc/machine-id" ]; then
+			echo "$SOURCE_DATE_EPOCH" | md5sum | cut -f1 -d' ' > \
+				"${TARGET}/etc/machine-id"
+		fi
+
+		find "$TARGET" -newermt "@$SOURCE_DATE_EPOCH" -print0 | \
+			xargs -0r touch --no-dereference --date="@$SOURCE_DATE_EPOCH"
 	fi
 fi
 
